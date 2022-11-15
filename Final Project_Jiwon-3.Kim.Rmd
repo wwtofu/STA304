@@ -1,0 +1,784 @@
+---
+output:
+  pdf_document: default
+---
+
+---
+title: '**Estimating Treatment Effects of Higher Education Level: An Evaluation Using Propensity Score Matching**'
+author: "Ji Won Kim - 1002685212"
+date: "18/06/2021"
+output: pdf_document
+---
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+library(openintro)
+```
+
+# Abstract
+
+While randomization is at the heart of observational study, self-selection bias and ethical issues plague in many randomized controlled trials. Using the monthly Labour Force Survey (LFS) data from Statistics Canada, we use propensity score matching (PSM) and appropriate regression techniques that allows us to post-hoc analyze the causal effects of attaining education level higher than Bachelor's degree having on the hourly wage earnings. We use logistic regression and nearest neighborhood approach to construct paired observations consisting of one treatment and one non-treatment respondent, followed by multiple regression to make predictions on hourly wage with several explanatory variables. Our result shows that there is indeed a statistically significant evidence that the earnings of treatment group is higher than non-treatment groups. However, we conclude that a more sophisticated approach on variable selection is required in order to increase the precision of estimated treatment effect and minimize the bias.
+
+# Introduction
+
+It is generally accepted that graduates with higher educational attainment have higher earnings. According to the US Census Bureau (2019, as cited in Kerr, 2021), the median earnings of full-time workers holding a bachelor's degree was \$66,536 in 2019. With a master's degree, the median earnings jumped to \$81,636, which is over 22% increase. Nevertheless, it is not clear whether to accept that this result is actually due to differences in education level itself. For example, graduates from wealthy household could possibly be a factor that affects the overall income.
+
+Researchers are often interested in performing a randomized controlled trial (RCT) to test hypothesis on effects of a treatment. RCT is a statistical methodology used to determine whether a cause and effect relation exists between treatment and the outcome of interest. The core idea behind RCT is that individuals are randomly assigned to either the treatment group or the control group, and conclusion is drawn that any observed differences in the outcome of interest is due to the treatment itself (Kendall, 2003). However, it is often a challenging task to design a truly randomized control group study because it is inefficient and faces ethical issues in many cases. For example, it is unrealistic to assign people to each group and force the treatment group attend graduate school while non-treatment group is not permitted to attend graduate school. So how must we account with this issue?
+
+In this paper, we use the Labour Force Survey data to examine whether there exists a causal relationship between education level and hourly earnings among Millennials (born in between 1981-1997) can be shown without the use of randomized controlled trial. We hypothesize that, on average, graduates with higher education have higher earnings. In particular, we claim that there is a statistically significant evidence that graduates with academic attainment above bachelor's degree have higher hourly wage than those who completed in degree equal or less than bachelor's degree. We attempt to show this by using ***propensity score matching (PSM)***, a technique for constructing an "artificial" control group by matching a treated unit with non-treated unit depending on observations' propensity score- the likelihood of each unit experiencing treatment (World Bank, n.d.). The main benefit of using propensity score matching is that it reduces confounding (variable that influences both dependent & independent variable) between treated and non-treated group. In our study, respondents with education levels higher than a bachelor's degree are assigned to the treatment group, while those with education levels lower than a bachelor's degree are assigned to the non-treated group.
+
+We define education level as the highest level of certificate, diploma, or degree completed. The term "higher than bachelor's degree" refers to those who have completed certificate, diploma, or degree above bachelor's level; this includes anyone with completion in masters/doctoral program or equivalent level. On the other hand, educational level "equal or lower than bachelor's degree" includes those with bachelor's degree, certificate/diploma in -secondary, some post-secondary with no certificate/diploma, high school graduate/some high school, or 0-8 years of education. Note that we will use the term **"higher education level"** to denote **education level above bachelor's degree** throughout this paper.
+
+# Data
+
+## Data Collection Process
+
+Our analysis is based on mandatory Labour Force Survey (LFS) conducted by the Statistics Canada. The LFS collects monthly information on the labour market activities of Canada's working age population to measure the current state of the Canadian labour market and is used to calculate employment and unemployment rates at national, provincial, territorial and regional level (Statistics Canada, 2018).
+
+The LFS involves probability sampling based on a stratified two-stage design, where each province is sub-divided into geographic stratum. The first stage of sampling consists of selecting smaller geographic areas, called clusters, from within each stratum. The second stage of sampling consists of selecting dwellings from within each selected cluster. Every member of each household represents approximately 290 Canadians of same age and sex (Statistics Canada, 2018). The LFS sends out an email or letter notifying the mandatory participation of the survey. Then, telephone interviews are conducted for all designated respondents, where respondents are asked to provide their demographic information following details into their current labour status (Statistics Canada, n.d.a). The full version of of the questionnaire as well as recorded variables are available in the Appendix.\
+
+## Bias
+
+The survey data we are using for our analysis was collected in May 2021. When we originally planned this study, we attempted to obtain data collected before the Covid-19 pandemic sent shock waves through Canadian job market; however, any data prior to January 2021 was unavailable for access. Selecting an appropriate time frame of the survey data is especially important in this time of pandemic for the reason of avoiding potential time period bias. For example, employment since the onset of crisis affected the most in accommodation and food services, which usually tend to employ younger, lower-educated workers (Hirsch, 2004). Since the purpose of our study does not account for impact of Covid-19 on the job market, we selected data collected in March 2021 as the difference in the unemployment rate during pre-pandemic and post-pandemic was the lowest among 5 montly datasets available for access (7.5% in March 2021 compared to 5.4% in May 2019) (Statistics Canada, 2021). Nevertheless, our data may not be the best representative of the "normal" job market.
+
+Moreover, students who are currently pursuing a degree are not considered as graduates and therefore not counted towards the data, which can possibly lead to a bias. For example, the highest education level attained by a master's degree student who graduated with a bachelor's degree will be counted as a bachelor's degree rather than a master's degree, since the questionnaire asks for the "higest level of schooling \*\*completed\*\*". This may lead to a bias since working labour currently pursuing a degree in master's program would likely be paid higher than those of undergrad students, yet be counted as a undergraduate.\
+
+## Data Summary
+
+Our original raw data includes 86,552 responses with 60 variables, having detailed breakdowns by demographic characteristics, industry and occupation, education level, job tenure, wage, etc. Among the entire dataset, we used 15,725 responses after data cleansing, of which 2,964 responses were actually matched after performing propensity score matching.
+
+```{r, include = FALSE}
+# Data Cleaning
+install.packages("readr")
+install.packages("tidyverse")
+install.packages("dplyr")
+install.packages("plyr")
+install.packages("gtsummary")
+install.packages("MASS")
+install.packages("arm")
+install.packages("lme4")
+install.packages("coefplot")
+install.packages("pander")
+
+#Set working directory & read data
+setwd('/Users/jiwonkim/Desktop/STA304/Final Project')
+data <- read_csv("pub0321.csv")
+
+
+# Extract & mutate variables of interest
+data <- data[!(data$LFSSTAT == 3 | data$LFSSTAT == 4), ] %>%
+  mutate(id = REC_NUM,
+         educ_degree = factor(EDUC,
+                         levels = c(0, 1, 2, 3, 4, 5, 6),
+                         labels = c(0, 0, 0, 0, 0, 0, 1)),
+         student_status = factor(SCHOOLN,
+                                 levels = c(1, 2, 3),
+                                 labels = c("Non-student", "Full-time student", "Part-time student")),
+         hrly_wage = HRLYEARN/100,
+         sex = factor(SEX,
+                      levels = c(1, 2),
+                      labels = c("Male", "Female")),
+         province = factor(PROV,
+                           levels = c(10, 11, 12, 13, 24, 35, 46, 47, 48, 59),
+                           labels = c("NL", "PE", "NS", "NB", "QC", "ON", "MB", "SK", "AB", "BC")),
+         age_group = factor(AGE_12,
+                            levels = c("01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"),
+                            labels = c("N/A", "20 to 24", "25 to 29", "30 to 34", "35 to 39", 
+                                       "N/A", "N/A", "N/A", "N/A", "N/A", "N/A", "N/A")),
+         type_employ = factor(FTPTMAIN,
+                              levels = c(1, 2),
+                              labels = c("Full-time", "Part-time"))) %>% 
+  dplyr::select(id, sex, age_group, province, age_group, type_employ, student_status, educ_degree, hrly_wage)
+
+
+### Handling NA values
+## Replace N/A values in student_status into "Non-student"
+
+# First we define a factor level "Others"
+levels <- levels(data$student_status)
+levels[length(levels) + 1] = "Others"
+
+# Refactor student_status to include "Others"
+data$student_status <- factor(data$student_status, levels = levels)
+
+# Assign N/A into level "Others"
+data$student_status[is.na(data$student_status)] = "Others"
+
+# Replace the factor "Others" into factor "Non-student"
+
+plyr::revalue(data$student_status, c("Others" = "Non-student")) -> data$student_status
+
+# Delete responses collected by respondents of age "N/A" and drop its factor level
+data <- data[!(data$age_group == "N/A"), ]
+data$age_group <- (droplevels(data$age_group, exclude="N/A"))
+
+# Omit rows with missing values
+data <- na.omit(data)
+
+
+```
+
+Raw data often does not come in the form where we can directly use it for analysis. There may be missing values, inconsistent responses, structural errors, and many other ways that can potentially impact the modeling process or result in an unexpected way. Therefore, it is important to appropriately clean the data that meets the requirements in the methodology.
+
+In our LFS data, we filtered out anyone who is not currently in the labour force, meaning that anyone who is not currently employed was excluded from our sample. Seven variables were included in the propensity score matching: age group, sex, education level, hourly wage, province, student status, type of employment, and the respondent id number. The values of hourly wage was divided by 100 since the original data didn't contain the two decimal points. Next, we changed the every categorical variables' response values from numbers to factors and appropriately renamed the responses that matches the description of each categories. Every respondents who were in the age group between 15 to 19 and those over 39 were omitted (and deleted all factor levels in this age group), leaving out age group between 20 to 39. Then, we replaced every missing values in student status to non-student. Lastly, we excluded any responses that contains at least one missing response value.
+
+The variables we selected are used are to appropriately estimate the propensity (or likelihood) of a respondent being in the treatment group or not, i.e. propensity of respondent having education degree above bachelor's degree or not. The following is a description of important variables used for our propensity score matching analysis:
+
+-   **Age group**\
+    Age of the respondent is sub-divided to five-year age groups. In the original data, age is collected for every household member in the survey, and the information on labour market activity is collected for all persons aged 15 and over. However, we excluded anyone who is in the age group of 15-19 and those over 40, since our goal is to show if there is any statistical significance of attaining education level higher than bachelor's degree among the Millennials (born in between 1981-1996).
+
+-   **Education level**\
+    Education level is a binary outcome categorical variable determining the highest level of schooling completed. Anyone who have completed degree above bachelor's degree are considered "treated", and therefore assigned to value 1. Note that treated respondents are those who have attained a degree or certificate equivalent or higher than master's degree. Those who have not obtained a degree above bachelor's degree are considered "untreated", and are assigned to value 0. Thus, education level is the core factor that identifies whether the person was treated or not.
+
+-   **Hourly wage**\
+    Hourly wage is a numeric variable that indicates the usual hourly wage of the individual, including tips, commission and bonuses (before taxes and other deductions). Wage will be our outcome variable that determines whether respondents who have higher educational degree (treated group) are more likely to have higher earnings.
+
+-   **Type of employment**\
+    Full-time or part-time work schedule. Full-time employment consists of persons who usually work 30 hours or more per week at their main or only job. Part-time employment consists of persons who usually work less than 3 hours per week at their main or only job. The type of employment is usually highly correlated to the overall wage as well as the educational attainment. For example, the wages of part-time workers are considerably lower than those of full-time workers **(**Hirsch, 2005).
+
+-   **Sex**\
+    Sex is a binary outcome categorical variable referring to the biological sex assigned at birth. Sex plays an important role in determining the wage, since it is common that different sex (and gender) experience wage gaps.
+
+-   **Province**\
+    Province is the geographical area in which the respondent resides is sub-divided into 10 provinces in Canada. Geographical is likely to impact the respondent's educational level as well as the wage, because it is observed that regional students were under-represented in higher education when compared to peers from urban areas (Baglin et. al., 2017).
+
+-   **Student status\
+    **Student status is a categorical variable that refers to the differentiation of student, divided into full-time student, part-time student, and non-student. Note that anyone who have graduated or currently in leave of absence are categorized as non-student. Student status affect the overall wages since student workers are highly likely to be working part-time, and therefore paid substantially lower wages and benefits than do full-time jobs.
+
+```{r, echo = F}
+
+#Summary statistics
+
+data2 <- data %>%
+dplyr::select(educ_degree, hrly_wage, sex, age_group, student_status, type_employ, province)
+
+library(gtsummary)
+
+my_theme <-
+list(# Some gt customization
+  "as_gt-lst:addl_cmds" = list(
+  # make the font size small
+  tab_spanner = rlang::expr(gt::tab_options(table.font.size = 'small')),
+  # add a custom title and subtitle to every table
+  user_added1 = rlang::expr(gt::tab_header(
+    title = "")),
+  # add a custom data source note
+  user_added2 = rlang::expr(gt::tab_source_note(
+    source_note = "")),
+  # stripe the table rows
+  user_added3 = rlang::expr(gt::opt_row_striping()),
+  user_added4 = rlang::expr(gt::opt_table_lines("none"))))
+
+reset_gtsummary_theme()
+
+set_gtsummary_theme(my_theme)
+tbl_summary(data2,
+                       by = educ_degree,
+                       type = list(hrly_wage ~ "continuous", sex ~ "categorical"),
+                       digits = hrly_wage ~ 2,
+                       label = list(hrly_wage ~ "HOURLY WAGE",
+                                    sex ~ "SEX",
+                                    age_group ~ "AGE GROUP",
+                                    student_status ~ "STUDENT STATUS",
+                                    type_employ ~ "EMPLOYMENT TYPE",
+                                    province ~ "PROVINCE"))
+
+wage_treatment <- data %>% 
+  filter(educ_degree == 1) %>% 
+  dplyr::select(hrly_wage)
+
+wage_non_treatment <- data %>% 
+  filter(educ_degree == 0) %>% 
+  dplyr::select(hrly_wage)
+
+```
+
+**Table 1**. Summary statistics of variables grouped by education level (0: treated, 1: non-treated). The brackets within hourly wage shows the median IQR; for every categorical variables, the number of observations and its relative proportion within the group is shown.
+
+The summary statistics for our LFS dataset are shown in Table 1, grouped by education level. Notice that every explanatory variables are categorical variables. The mean hourly wage of the entire sample is `r round(mean(data$hrly_wage), 2)` with standard deviation of `r round(sd(data$hrly_wage), 2)`. The median (mean) hourly wage of treatment group is \$35.1 (\$`r round(mean(wage_treatment$hrly_wage), 2)`), and \$24.0 (\$`r round(mean(wage_non_treatment$hrly_wage), 2)`) for non-treatment group. This implies that there is some evidence that there exists some difference of hourly wage in the treatment group and non-treatment group.
+
+```{r, echo = F}
+
+# Use this to create some plots. 
+
+
+# install.packages("esquisse")
+# install.packages("cowplot")
+library(esquisse)
+library(ggplot2)
+library(dplyr)
+library(cowplot)
+
+## Make a plot comparing responses from treatment group and non-treatment group
+
+
+treatment <- data %>%
+  filter(data$educ_degree ==1)
+
+non_treatment <- data %>%
+  filter(data$educ_degree == 0)
+
+# SEX
+educ_degree_sex <- c(rep(as.factor(1), length(levels(data$sex))), 
+                     rep(as.factor(0), length(levels(data$sex))))
+
+treatment_sex <- treatment %>% 
+  group_by(sex) %>% 
+  dplyr::summarise(n = n()) %>% 
+  mutate(freq = n / sum(n))
+ 
+non_treatment_sex <- non_treatment %>% 
+  group_by(sex) %>% 
+  dplyr::summarise(n = n()) %>% 
+  mutate(freq = n / sum(n))
+
+sex <- rbind(treatment_sex, non_treatment_sex) %>%
+  cbind(educ_degree_sex, .)
+ 
+graph_sex <- ggplot(data = sex,
+                    aes(x = sex, y = freq, 
+                        group=educ_degree_sex)) + 
+  geom_point() +
+  geom_line(aes(linetype = educ_degree_sex, 
+                 colour = educ_degree_sex, 
+                size = educ_degree_sex)) +
+  scale_color_manual(values=c('#BD1B1B', '#125AD2'))+
+  scale_linetype_manual(values=c("twodash", "solid"))+
+  scale_size_manual(values=c(0.7, 0.6))+
+  theme_classic() +
+  theme(legend.position = c(0.2, 0.8), 
+        legend.key.size = unit(0.3, 'cm'),
+        legend.title = element_text(size=8),
+        legend.text = element_text(size=8),
+        axis.title.x=element_blank()) + 
+  scale_fill_discrete(name = "Groups", labels = c("Treated", "Non-treated")) +
+  ylim(0,1)
+
+
+# PROVINCE
+
+educ_degree_province <- c(rep(as.factor(1), length(levels(data$province))),
+                          rep(as.factor(0), length(levels(data$province))))
+
+
+treatment_prov <- treatment %>% 
+  group_by(province) %>% 
+  dplyr::summarise(n = n()) %>% 
+  mutate(freq = n / sum(n))
+
+
+
+non_treatment_prov <- non_treatment %>%
+  group_by(province) %>% 
+  dplyr::summarise(n = n()) %>% 
+  mutate(freq = n / sum(n))
+
+
+province <- rbind(treatment_prov, non_treatment_prov) %>% 
+cbind(educ_degree_province)
+
+graph_province <- ggplot(province, 
+                 aes(x = province, y = freq, group = educ_degree_province)) + 
+  geom_line(aes(linetype = educ_degree_province, colour = educ_degree_province), show.legend = FALSE) +
+  geom_point() +
+  scale_linetype_manual(values=c("twodash", "solid"))+
+  scale_color_manual(values=c('#BD1B1B', '#125AD2'))+
+  scale_size_manual(values=c(1.2, 1))+
+  theme_classic() +
+  # theme(legend.position = c(0.8, 0.2), 
+  #       legend.key.size = unit(0.3, 'cm'),
+  #       legend.title = element_text(size=8),
+  #       legend.text = element_text(size=8)) +
+  # theme(legend.position = "none", 
+  #       axis.title.x=element_blank()) +
+  ylim(0, 1)
+
+
+# AGE GROUP
+
+educ_degree_age <- c(rep(as.factor(1), length(levels(data$age_group))),
+                     rep(as.factor(0), length(levels(data$age_group))))
+
+treatment_age <- treatment %>% 
+  group_by(age_group) %>% 
+  dplyr::summarise(n = n()) %>% 
+  mutate(freq = n / sum(n))
+ 
+non_treatment_age <- non_treatment %>% 
+  group_by(age_group) %>% 
+  dplyr::summarise(n = n()) %>% 
+  mutate(freq = n / sum(n))
+
+age_group <- rbind(treatment_age, non_treatment_age) %>% 
+  cbind(educ_degree_age, .)
+ 
+graph_age <- ggplot(data = age_group,
+                    aes(x = age_group, y = freq, group=educ_degree_age)) +
+  geom_point() +
+  geom_line(aes(linetype = educ_degree_age, colour = educ_degree_age), show.legend = FALSE) +
+  geom_point() +
+  scale_linetype_manual(values=c("twodash", "solid"))+
+  scale_color_manual(values=c('#BD1B1B', '#125AD2'))+
+  scale_size_manual(values=c(1.2, 1))+
+  theme_classic() +
+  theme(legend.position = "none",
+        axis.title.x=element_blank()) +
+  ylim(0, 1)
+
+ # + facet_wrap(vars(educ_degree_age), ncol=2)
+
+
+# EMPLOYMENT TYPE
+educ_degree_employ <- c(rep(as.factor(1), length(levels(data$type_employ))), 
+                          rep(as.factor(0), length(levels(data$type_employ))))
+
+treatment_employ <- treatment %>% 
+  group_by(type_employ) %>% 
+  dplyr::summarise(n = n()) %>% 
+  mutate(freq = n / sum(n))
+ 
+non_treatment_employ <- non_treatment %>% 
+  group_by(type_employ) %>% 
+  dplyr::summarise(n = n()) %>% 
+  mutate(freq = n / sum(n))
+
+type_employ <- rbind(treatment_employ, non_treatment_employ) %>% 
+  cbind(educ_degree_employ, .)
+ 
+graph_employ <- ggplot(data = type_employ, 
+                 aes(x = type_employ, y = freq, group=educ_degree_employ)) + 
+  geom_point() +
+  geom_line(aes(linetype = educ_degree_employ, colour = educ_degree_employ)) +
+  scale_linetype_manual(values=c("twodash", "solid"))+
+  scale_color_manual(values=c('#BD1B1B', '#125AD2'))+
+  scale_size_manual(values=c(1.2, 1))+
+  theme_classic() +
+  theme(legend.position = "none",
+        axis.title.x=element_blank()) +
+  ylim(0, 1)
+
+# Student status
+
+educ_degree_student <- c(rep(as.factor(1), length(levels(data$student_status))),
+                         rep(as.factor(0), length(levels(data$student_status))))
+
+treatment_student <- treatment %>%
+  group_by(student_status) %>%
+  dplyr::summarise(n = n()) %>%
+  mutate(freq = n / sum(n))
+
+non_treatment_student <- non_treatment %>%
+  group_by(student_status) %>%
+  dplyr::summarise(n = n()) %>%
+  mutate(freq = n / sum(n))
+
+type_student_status <- rbind(treatment_student, 
+                             non_treatment_student) %>%
+  cbind(educ_degree_student, .)
+
+
+graph_student <- ggplot(data = type_student_status,
+                 aes(x = student_status, y = freq,
+                     group=educ_degree_student)) +
+  geom_point() +
+  geom_line(aes(linetype = educ_degree_student, 
+                colour = educ_degree_student)) +
+  scale_linetype_manual(values=c("twodash", "solid"))+
+  scale_color_manual(values=c('#BD1B1B', '#125AD2'))+
+  scale_size_manual(values=c(1.2, 1))+
+  theme_classic() +
+  theme(legend.position = "none",
+        axis.title.x=element_blank()) +
+  scale_x_discrete(labels = c("Non-student" = "Non-Stdnt",
+                              "Full-time student" = "FT-Studnt",
+                              "Part-time student" = "PT-Studnt")) +
+  ylim(0, 1)
+
+
+
+## Education level
+
+prop_treated <- (nrow(subset(data, data$educ_degree == 1)) / nrow(data))
+
+prop_non_treated <- nrow(subset(data, data$educ_degree == 0)) / nrow(data)
+
+freq = c(prop_treated, prop_non_treated)
+
+educ_level = c("Treated", "Non treated")
+
+# educ_level = factor(educ_level)
+
+prop_educ_degree <- tibble(educ_level, freq) 
+
+graph_educ <- ggplot(data = prop_educ_degree,
+                 aes(x = educ_level, y = freq, group = 1)) + 
+  geom_point() +
+  geom_line() +
+  theme_classic() +
+  theme(legend.position = "none",
+        axis.title.x=element_blank()) + 
+  ylim(0,1)
+
+
+## Combine all plots together 
+plot_grid(graph_sex, graph_province, graph_age, graph_employ, graph_student, graph_educ,
+          nrow = 3)
+
+
+
+
+```
+
+**Figure 1.** Comparison of ratios among various demographic subgroups between treated group (red dotted) and non-treated group (blue).
+
+The figure above shows the proportion of each categories in the treatment group and non-treatment group, as well as a plot showing the proportion of treated and non-treated group in the whole sample. The proportion of treated and non-treated group is `r round(prop_educ_degree$freq[educ_level == "Treated"], 2) * 100`% and `r round(prop_educ_degree$freq[educ_level == "Treated"],2) * 100`%, respectively. We can see that the distribution of each categories among the two groups are pretty similar. For sex, treatment group is more female dominant, consisting of 59.8%. In terms of geographical area, Ontario has the highest proportion of respondents currently residing in both groups, with Newfoundland and Labrador being the least concentrated area (2.4%\~2.6%). As one might expect, the proportion of non-student and full-time workers are highly dominant.
+
+***All analysis for this report was programmed using `R version 4.1.0`***.
+
+# Methods
+
+## I. Model
+
+In order to estimate the effect of attaining higher education level on the wage, we make use of the ***propensity score matching (PSM)*** with use of linear regression and nearest neighborhood matching. Propensity score matching is a method for addressing selection bias and moving towards more causal estimates (Rosenbaum & Rubin, 1983), and has lately has been resurfaced due to rising popularity of artificial intelligence (Caetano, 2020). The reason for choosing PSM as our model is because it reduces greater portion of bias when precisely estimating the effect of a treatment (Carolyn et. al, 2010); it is realistically impossible (and unethical) to obtain a randomized control group by randomly assigning observations to each groups and determine whether or not they should receive higher education levels. Rather, the core idea behind PSM is motivated by forming a matched set of treated and untreated subjects sharing similar propensity score, analogous to forming a post-hoc randomized control group of study. Propensity score refers to the probability or likelihood of an observation being in the control group. This allows to examine whether there is any statistically significant effect of a treatment for example, if individual A and B share perfectly identical demographic characteristics except the treatment (education level) itself, then we can say that any difference between the outcome variable of interest (difference in hourly wage) can be explained by the treatment.
+
+## II. Methodology
+
+**1. Estimating Propensity Score**\
+Based on given demographic information of the respondents, we use logistic linear regression model to estimate the propensity score, analogous to the probability of each respondent being treated. We use logistic model in our case since the response variable is education level, which has binary outcome- treated or non-treated. On the other hand, sex, age, province, employment type, and student status are the independent variables that will explain the relationship with the response variable. Using $p$ to indicate the propensity score estimate, p is described by
+
+$logit(p)=\log \left(\frac{\hat{p}}{1-\hat{p}}\right)=\hat{\beta}_{0} + \hat{\beta}_{i[j]}^{AGE} {x}+ \hat{\beta}_{i[j]}^{SEX}{x}+ \hat{\beta}_{i[j]}^{PROV} {x}+ \hat{\beta}_{i[j]}^{STDNT} {x}+ \hat{\beta}_{i[j]}^{EMPLOY} {x}$
+
+Where $\hat{\beta}_{0}$ is the fixed intercept and the terms $\hat{\beta}_{i[j]}^{AGE}, \hat{\beta}_{i[j]}^{SEX}, \hat{\beta}_{i[j]}^{PROV}, \hat{\beta}_{i[j]}^{STDNT}, \hat{\beta}_{i[j]}^{EMPLOY}$ corresponds to the coefficient associated with each categorical variable. Since each categories have multiple response values, the subscript $i[j]$ is added in the coefficients. For example, $\hat{\beta}_{i[j]}^{SEX}$ takes in values of $\hat{\beta}_{male}^{SEX}$ and $\hat{\beta}_{female}^{SEX}$. Note that the logit function $log\left(\frac{\hat{p}}{1-\hat{p}}\right)$ in the equation above is also called the log odds. appropriate estimate of propensity score is calculated by solving for $p$ in the left hand side of the equation. We then augment the results into our original dataset so that every observation is assigned to its relative propensity score.
+
+**2. Nearest Neighborhood Matching**\
+Once the propensity score is estimated, we use our forecast to generate paired matches based on the propensity score of each observation by using single nearest neighborhood matching. This means that we match each respondent who has education level above bachelor's degree with another individual who do not have education levels above bachelor's degree but have a similar probability (i.e. a similar propensity score) of obtaining a bachelor's degree. In our case, the respondent with "similar probability/propensity score" is identified by locating another respondent who has the closest propensity score, which is the core function of nearest neighborhood matching. We reduce our dataset so that it only contains matched pairs of observations. The number of total matched pairs is equal to the total number of respondents in the treatment group. In case of our study, there were total of `r nrow(subset(data, educ_degree == 1))` treated observations, thus we have `r nrow(subset(data, educ_degree == 1))` pairs of matched dataset (total of 2 \* `r nrow(subset(data, educ_degree == 1))` = `r 2*nrow(subset(data, educ_degree == 1))` observations).
+
+**3. Estimating Outcome Variable**\
+The final step of our PSM method is to use multiple linear regression to estimate the response variable (hourly wage) based on all explanatory variables including the education level (age, sex, province, student status, type of employment AND education level). This gives interpretation on the linear relationship between each explanatory variable and the hourly wage.
+
+## **III. Underlying Assumptions**
+
+One of the key assumption of PSM is that untreated units can be compared to treated units based on some observable traits, as if the treatment had been fully randomized (World Bank, n.d.). In addition, it requires a conditional independence between the potential outcome (hourly wage) and the treatment status (Baum, 2013). Lastly, every observations have a positive probability of being both treated and untreated. In this way, PSM aims to mimic randomization in order to counter the selection bias issues that plague non-experimental methods (World Bank, n.d. a).
+
+When estimating the hourly wage in step 3 of PSM, using multiple linear regression model entails several underlying assumptions (Statistics Solutions, n.d. a). First, the model assumes linearity: there is a linear relationship between the outcome variable (hourly wage) and all the explanatory variables. That is, the expected value of hourly wage is a straight-line function of every independent variable. Second, residuals are normally distributed (multivariate normality). Third, it assumes independence of individual observations. Fourth, variance of error terms are the same across every independent variables (homoscedasticity). Finally, the model assumes independent variables are not highly correlated to each other (no multicollinearity).
+
+Note that logistic regression model do not make some of the key assumptions of linear regression (Statistics Solutions, n.d. b). In particular, logistic regression does not require assumption of normality of residuals and homoscedasticity. Rather, it assumes linearity of independent variables and the logit which is $log\left(\frac{\hat{p}}{1-\hat{p}}\right)$, and that outcome of dependent variable to be binary.
+
+# Results
+
+```{r, include = FALSE}
+
+
+# Run propensity score matching
+
+# First we construct a logistic linear regression model that explains 
+# whether the respondent was treated as a function of the variables we think explain it.
+propensity_score <- glm(educ_degree ~ sex + age_group + province + type_employ + student_status,
+                        family = binomial,
+                        data = data)
+
+
+# We add our forecasted propensity score into our dataset. 
+library(broom)
+
+data <- augment(propensity_score,
+                data = data,
+                type.predict = "response") %>%
+  dplyr::select(-.resid, -.std.resid, -.hat, -.sigma, -.cooksd)
+
+
+# Now we use our forecast to create matches based on the propensity score.
+# We want to match those who have education level above bachelor's degree 
+# with someone who does NOT have education level above bachelor's degree 
+# BUT has a similar probability of getting a bachelor's degree
+data <- data %>% 
+  arrange(.fitted, educ_degree)
+
+
+# Here we are going to use a matching function from arm package. This finds
+# Which is the closest observation that were not treated, to each on that was treated. 
+
+
+library(MASS)
+library(arm)
+library(dplyr)
+
+data$treated <-
+  if_else(data$educ_degree == 0, 0, 1)
+
+matches <- arm::matching(z = data$treated,
+                         score = data$.fitted)
+
+data <- cbind(data, matches)
+
+# Now we reduce the dataset to only those who are matched.
+# Since there are 1470 treated observations, we would expect 1470 * 2 = 2940 observations
+data_matched <- 
+  data %>% 
+  filter(match.ind != 0) %>% 
+  dplyr::select(-match.ind, -pairs, -treated)
+
+
+
+# Use multiple linear regression to estimate hourly wage based on 
+# all explanatory variables including educ_degree
+propensity_score_regression <- lm(hrly_wage ~ sex + age_group + province + type_employ + student_status + educ_degree,
+                                  data = data_matched)
+
+
+
+```
+
+We first discuss the result of our logistic regression. **Figure 2** shows the regression output for prediction of education level with respect to age, sex, province, type of employment, and student status. Considering the coefficients with highest significance level, the estimation tells us that that females who are full-time students and living in Ontario are the most likely to be in the treatment group, i.e. receive higher level of education. Moreover, it is evident that there is a very strong, positive linear relationship with the treatment as the age group gets older- this is as predicted since many young students currently in the masters/doctoral program are counted as non-treatment group (since the survey question asks for the highest educational level **completed**).
+
+```{r, logistic output, echo = F}
+
+# Coefficient table showing logistic regression output
+
+library(coefplot)
+
+coefplot(propensity_score,
+         intercept = F,
+         newNames = c("educ_degree1" = "Treated",
+                      "student_statusPart-time student" = "Part-time Student",
+                      "student_statusFull-time student" = "Full-time student",
+                      "student_statusPart-time student" = "Full-time student",
+                      "type_employPart-time" = "Part-time employee",
+                      "age_group35 to 39" = "35 to 39",
+                      "age_group30 to 34" = "30 to 34",
+                      "age_group25 to 29" = "25 to 29",
+                      "provinceBC" = "British Columbia",
+                      "provinceAB" = "Alberta",
+                      "provinceSK" = "Saskatoon",
+                      "provinceMB" = "Manitoba",
+                      "provinceON" = "Ontario",
+                      "provinceQC" = "Quebec",
+                      "provinceNB" = "New Brunswick",
+                      "provinceNS" = "Nova Scotia",
+                      "provincePE" = "Prince Edward Island",
+                      "sexFemale" = "Female"),
+         title = "",
+         fillColor = "white",
+         color  = "blue",
+         zeroColor = "red")
+
+```
+
+**Figure 2. Coefficient plot showing logistic regression results with its respective 95% (thick), 99% (thin) confidence interval**
+
+Using the fitted values from the logistic regression output, we assigned each respondent by its respective propensity score, that is the likelihood of them being in the treatment group. We then used nearest neighborhood matching to create a new dataset that has pairs of observations that consists of treated and non-treated respondents. The dataset contains `r nrow(data_matched)` observations, of which consists of `r nrow(data_matched)/2` matched pairs, which is quite a serious data reduction compared to `r nrow(data)` observations in our cleaned dataset.
+
+\newpage
+
+\
+
+```{r, echo = F}
+
+# Table of regression results after performing propensity score matching
+
+library(pander)
+pander(propensity_score_regression,
+       title = "None")
+
+```
+
+**Table 2: Multiple regression analysis of age, sex, province, student status, type of employment, and education level as predictors of current hourly wage**
+
+With our matched dataset, we performed multiple linear regression to estimate the response variable (hourly wage) based on all explanatory variables including the education level **(Table 3)**. This gives interpretation on the linear relationship between each explanatory variable and the hourly wage, as well as its respective standard error, test statistics, and p-value for two-sided hypothesis test.
+
+As expected, the result clearly shows that education level has coefficient of 7.372 with p-value of $1.78e^{-52}$ making it the "strongest" predictor that has positive relationship with the hourly wage. The test result is highly significant since it implies that the chance of getting such result when the null hypothesis is true ($H_{0}: \beta^{EDUC}_{treated} = 0$ ) is $1.78e^{-52}$, which is significantly less than 0.05. In terms of sex, females are less likely to have higher earnings. Similar to the results of the logistic regression, all age groups had positive linear relationship with hourly earnings, where older age groups are the most likely to be paid the highest. This is quite trivial as people in the older age group are likely to have more job experience, and therefore have higher wages.
+
+Along 10 provinces across Canadian Territory, Ontario and Alberta had were the only provinces with positive linear relationship with wage- with New Brunswick being the lowest and considerably significant. Looking at the overall result, we believe that our model predictions are quite reasonable; however, it is difficult to assess their accuracy as our model relies on many underlying assumptions, such as linearity and low correlation of independent variables (World Bank, n.d.).
+
+```{r, echo = F}
+
+# Hypothesis testing
+
+# Ond-side t-test for matched dataset
+
+y2_treated <- data_matched$hrly_wage[data_matched$educ_degree == 1]
+y2_nontreated <- data_matched$hrly_wage[data_matched$educ_degree == 0]
+
+difference2 <- y2_treated - y2_nontreated
+
+
+t.test_matched <- t.test(difference2,
+                         alternative = "greater")
+
+x <- t.test(difference2)
+
+
+# Put the results in a table
+
+library(pander)
+pander(t.test_matched)
+
+
+
+```
+
+Finally, we performed a one-tailed t-test on to test our hypothesis by taking the hourly wage differences between the treatment group and non-treatment group in our matched data. Our null hypothesis $H_{0}$ was that there is no difference in the mean hourly wage, while the alternative hypothesis $H_{a}$ claimed the treatment group have higher hourly earnings than non-treatment group. The test result shows that the p-value of the t-test is `r t.test_matched$p.value`, which means that given the null hypothesis is true, there is a (`r t.test_matched$p.value * 100`)% chance we get a result such that the mean hourly wage of treatment group is higher than the treatment. Therefore, we can reject the null hypothesis and accept the alternative hypothesis to conclude that hourly earnings of respondents with higher education is greater than those of who didn't receive higher education. In addition, the point estimate (mean) is `r round(t.test_matched$estimate, 2)`, which we can interpret that the mean difference of hourly wage between the treatment group and non-treatment group is \$`r round(t.test_matched$estimate, 2)`. More generally, we are 95% confident that the average difference of hourly wage between the treatment group and non-treatment group is greater than \$6.61.
+
+\newpage
+
+# Conclusion
+
+In this study, we conducted propensity score matching and linear regression to construct an artificial control group to prove our hypothesis on the existence of positive causal relationship between education level and hourly wage among Millennials. Propensity score matching is a method for addressing self-selection bias and moving towards more causal estimate. We used Statistics Canada's Labour Force Survey data to calculate the respective propensity score for each observation using logistic linear regression, followed by matching treated individuals with non-treated individuals using the nearest neighborhood matching. Our findings showed that there is indeed a statistically significant evidence that individuals with academic attainment above bachelor's degree have higher hourly earnings, with mean difference of \$7.4.
+
+In a bigger picture, we can draw several conclusions based on the results of our study. We demonstrated how propensity score matching allows us to perform a post-hoc analysis on causal inferences without having to rely on a randomized control study. Using observed data, this study showed that we can effectively add a randomization component on the obtained sample without having to confront ethical issues that is inherent in many randomized trials. Moreover, this study showed how multiple stages of linear regression can be employed to determine the average treatment effect on hourly earnings. Finally, we conclude that variable selection could be an important factor that can increase the overall robustness of the propensity score model.
+
+## Weaknesses
+
+The main weakness inherent in this study is that our particular model lies on many number of assumptions (mentioned in the methods section) that could make the overall result less "accurate". Because of time constraints and limited knowledge in sophisticated methodologies that could possibly make our research more robust, our model does not go into depth, but rather gives an idea of how propensity score matching can be performed. We haven't checked for the quality of matching nor a independence test for selected variables. Moreover, categorical variables dominate our data, which makes our study less quantitative. Lastly, our selection of data is not the best at this time of the moment since global job markets are still suffering to fully recover due to Covid-pandemic, which could possibly lead to a time period bias.
+
+## Next Steps
+
+This paper could be further expanded to the following areas: first, it is highly suggested to perform Chi-square test or equivalent prior to selection of explanatory variables. According to Avorn et. al (2006), choices of variables included in a propensity score model can affect the bias, variance and mean-squared error of the overall estimated treatment effect. In particular, they suggest that including variables that are unrelated to the treatment but related to the outcome variable increases the precision of estimated treated effect without increasing the bias. Second, using difference in differences model could have been a better approach in our case, as the main interest of our study is to seek causal relationship between education level and hourly wages. Third, evaluating the quality of matching (percent bias reduction (PBR), histogram comparison, etc.) is highly desirable in order to check the distribution/spread is roughly normal than before matching. Perhaps performing ANOVA test would be helpful to analyze the differences among mean of treatment and non-treatment group.
+
+## Discussion
+
+Propensity score matching offers a solution for reducing bias inherent in many observations studies and provide an effective way to make causal inferences by adding randomization component in post-hoc analysis. While propensity score seems to have potentials to be used in various study fields, it would be desirable to check and compare different models within PSM to evaluate which would be the most optimal choice in order for the result to be robust.
+
+# Bibliography
+
+1.  Rosenbaum, P., & Rubin, D. (1983). The central role of propensity score in observational studies for causal effects. *Biometrika*, *70(*1), 41--55. <https://doi.org/10.1093/biomet/70.1.41>
+
+2.  KDnuggests. (n.d.). *Propensity Score Matching in R.* KDnuggets. Retrieved from <https://www.kdnuggets.com/2018/01/propensity-score-matching-r.html/2>
+
+3.  Avorn, J., Brookhart, M., Glynn, R., Rothman, K., Schneeweiss, S., & Stürmer, T. (2006). Variable Selection for Propensity Score Models. *American Journal of Epidemiology, 163*(12), 1149-1156. <https://doi.org/10.1093/aje/kwj149>
+
+4.  Bialik, K., & Fry, R. (2019 Jan 30). *Millennial life: How young adulthood today compares with prior generations*. Paw Research Center. Retrieved from [\<https://www.pewresearch.org/social-trends/2019/02/14/millennial-life-how-young-adulthood-today-compares-with-prior-generations-2/\>](https://www.pewresearch.org/social-trends/2019/02/14/millennial-life-how-young-adulthood-today-compares-with-prior-generations-2/){.uri}
+
+5.  Baum, C. (2013). *Propensity Score Matching Regression Discontinuity Limited Dependent Variables*. [PowerPoint slides].\
+    Retrieved from [\<http://fmwww.bc.edu/EC-C/S2013/823/EC823.S2013.nn12.slides.pdf\>](http://fmwww.bc.edu/EC-C/S2013/823/EC823.S2013.nn12.slides.pdf){.uri}
+
+6.  Caetano, S. (2020 Nov 22). Propensity Score Matching - Theory. [Video file]. Microsoft Stream. Retrieved from [\<https://web.microsoftstream.com/video/53989ba9-82ec-4fcb-96bf-56d2e3cc3f9c\>](https://web.microsoftstream.com/video/53989ba9-82ec-4fcb-96bf-56d2e3cc3f9c){.uri}
+
+7.  Carolyn, H., Maffioli, A., & Vázquez, G. (2010). A Primer for Applying Propensity-Score Matching. *ResearchGate*.\
+    Retrieved from [\<https://doi.org/10.1016/j.crvasa.2013.04.001\>](https://doi.org/10.1016/j.crvasa.2013.04.001){.uri}
+
+8.  Cooper, G., Baglin, J., & Strathdee, R. (2017). *Access to higher education: Does distance\
+    impact students' intentions to attend university?* National Centre for Student Equity in\
+    Higher Education, Curtin University: Perth. Retrieved from [\<https://www.ncsehe.edu.au/wp-content/uploads/2017/02/RMIT_Cooper-Baglin-Strathdee.pdf\>](https://www.ncsehe.edu.au/wp-content/uploads/2017/02/RMIT_Cooper-Baglin-Strathdee.pdf){.uri}
+
+9.  Hirsch, B. (2004). Why do Part-Time Workers Earn Less? The Role of Worker and Job Skills. *IZA DP No.1261.* Retrieved from [\<https://www.iza.org/publications/dp/1261/why-do-part-time-workers-earn-less-the-role-of-worker-and-job-skills\>](https://www.iza.org/publications/dp/1261/why-do-part-time-workers-earn-less-the-role-of-worker-and-job-skills){.uri}
+
+10. Hlavac, Marek (2018). stargazer: Well-Formatted Regression and Summary Statistics Tables. R package version 5.2.2. [\<https://CRAN.R-project.org/package=stargazer\>](https://CRAN.R-project.org/package=stargazer){.uri}
+
+11. Kendall J. M. (2003). Designing a research project: randomised controlled trials and their\
+    principles. *Emergency medicine journal : EMJ*, *20*(2), 164--168.\
+    <https://doi.org/10.1136/emj.20.2.164>
+
+12. Kerr, E. (2021 March 30). *Is Graduate School Worth the Cost?.* US News.\
+    Retrieved from [\<https://www.usnews.com/education/best-graduate-schools/paying/articles/is-graduate-school-worth-the-cost\>](https://www.usnews.com/education/best-graduate-%20schools/paying/articles/is-graduate-school-worth-the-cost)
+
+13. Statistics Canada. (2021 May 07). *Labour Force Survey, April 2020*. [\<https://www150.statcan.gc.ca/n1/daily-quotidien/210507/dq210507a-eng.htm\>](https://www150.statcan.gc.ca/n1/daily-quotidien/210507/dq210507a-eng.htm){.uri}
+
+14. Statistics Canada. (2021). Labour Force Survey: Public Use Microdata File (pub0321) [CSV File].\
+    Retrieved from [\<https://doi.org/10.25318/71m0001x-eng\>](https://doi.org/10.25318/71m0001x-eng){.uri}
+
+15. Statistics Canada. (2018). Tell us how Canada works: The Labour Force Survey. Statistics Canada. Retrieved from [\<https://www.statcan.gc.ca/sites/default/files/lfs-brochure-epa-eng.pdf\>](https://www.statcan.gc.ca/sites/default/files/lfs-brochure-epa-eng.pdf){.uri}
+
+16. Statistics Canada. (n.d.c). *Labour Force Survey (LSF)*. Statistics Canada.\
+    Retrieved from <https://www.statcan.gc.ca/eng/survey/household/3701>
+
+17. Statistics Solutions. (n.d. a). *Assumptions of Multiple Linear Regression.* Complete Dissertation by Statistics Solutions. Retrieved from [\<https://www.statisticssolutions.com/free-resources/directory-of-statistical-analyses/assumptions-of-multiple-linear-regression/\>](https://www.statisticssolutions.com/free-resources/directory-of-statistical-analyses/assumptions-of-multiple-linear-regression/){.uri}
+
+18. Statistics Solutions. (n.d. b). *Assumptions of Logistic Regression.* Complete Dissertation by Statistics Solutions. Retrieved from [\<https://www.statisticssolutions.com/free-resources/directory-of-statistical-analyses/assumptions-of-logistic-regression/\>](https://www.statisticssolutions.com/free-resources/directory-of-statistical-analyses/assumptions-of-logistic-regression/){.uri}
+
+19. World Bank. (n.d.). *Propensity Score Matching*. World Bank.\
+    Retrieved from [\<https://dimewiki.worldbank.org/Propensity_Score_Matching\>](https://dimewiki.worldbank.org/Propensity_Score_Matching){.uri}
+
+**Packages**
+
+1.  Bates, D., Bolder, B., Maechler, M., & Walker, S. (2015). Fitting Linear Mixed-Effects Models Using lme4. *Journal of Statistical Software, 67*(1), 1-48. [doi:10.18637/jss.v067.i01.\\](doi:10.18637/jss.v067.i01.\){.uri}
+2.  Curry, M., Daniel, S., Hannum, M., Larmarange, J., Whiting K., & Zabor, E. (2021). gtsummary: Presentation-Ready Data Summary and Analytic Result Tables. R package version 1.4.1. <https://CRAN.R-project.org/package=gtsummary>\
+3.  Venables, W. N., & Ripley, D. (2002). Modern Applied Statistics with S. Fourth Ed. *Springer*, New York. ISBN 0-387-95457-0\
+4.  Gelman, A., & Su, Y. (2020). arm: Data Analysis Using Regression and Multilevel/Hierarchical Models. R package version 1.11-2. <https://CRAN.R-project.org/package=arm>\
+5.  Lander, J. (2021). coefplot: Plots Coefficients from Fitted Models. R package version 1.2.7. <https://CRAN.R-project.org/package=coefplot>\
+6.  Daróczi, G., & Tsegelskyi, R. (2021). pander: An R 'Pandoc' Writer. R package version 0.6.4. <https://CRAN.R-project.org/package=pander>\
+7.  Wickham et al. (2019). Welcome to the tidyverse. *Journal of Open Source Software, 4*(43), 1686, <https://doi.org/10.21105/joss.01686>
+
+\newpage
+
+# Appendix
+
+## Section 1: Supplementary Data
+
+1.  Full version of Labour Force Survey questionnaire. (Note that there are over 100 questions in the original questionnaire)
+
+    [<https://www23.statcan.gc.ca/imdb/p3Instr.pl?Function=getInstrumentList&Item_Id=1277826&UL=1V&>]\
+
+2.  Explanation of variables included in the original LFS data\
+    [<https://www23.statcan.gc.ca/imdb/p2SV.pl?Function=getSurvVariableList&Id=1313631>]\
+
+3.  Glimpse of data
+
+```{r, echo = F}
+# Head of data
+
+knitr::kable(head(data))
+```
+
+## Section 2: Supplementary Plots
+
+```{r, echo = F}
+# Supplementary Plot
+
+# Boxplot comparing hourly wages by education level and age group
+ggplot(data_matched) +
+ aes(x = age_group, y = hrly_wage, fill = educ_degree) +
+ geom_boxplot(shape = "circle", alpha = 0.5) +
+ scale_fill_manual(values = list(`0` = "#FBB2AC", `1` = "#89BDD4")) +
+ labs(x = "Age Group", y = "Hourly Wage (incld. tips)", 
+ fill = "Education Level") +
+ theme_classic() +
+ theme(legend.position = "bottom", plot.title = element_text(size = 9L, 
+ face = "bold"), plot.caption = element_text(size = 10L, face = "italic", hjust = 0.5),
+ axis.title.y = element_text(size = 8L), axis.title.x = element_text(size = 8L))
+```
+
+**Figure 3.** Comparison of hourly wages by education level and age group using matched dataset.
+
+```{r echo=F}
+
+# Coefficient plot showing regression result after performing 
+# propensity score matching
+
+
+
+library(coefplot)
+coefplot(propensity_score_regression,
+         intercept = F,
+         newNames = c("educ_degree1" = "Treated",
+                      "student_statusPart-time student" = "Part-time Student",
+                      "student_statusFull-time student" = "Full-time student",
+                      "student_statusPart-time student" = "Full-time student",
+                      "type_employPart-time" = "Part-time employee",
+                      "age_group35 to 39" = "35 to 39",
+                      "age_group30 to 34" = "30 to 34",
+                      "age_group25 to 29" = "25 to 29",
+                      "provinceBC" = "British Columbia",
+                      "provinceAB" = "Alberta",
+                      "provinceSK" = "Saskatoon",
+                      "provinceMB" = "Manitoba",
+                      "provinceON" = "Ontario",
+                      "provinceQC" = "Quebec",
+                      "provinceNB" = "New Brunswick",
+                      "provinceNS" = "Nova Scotia",
+                      "provincePE" = "Prince Edward Island",
+                      "sexFemale" = "Female"),
+         title = "",
+         fillColor = "white",
+         color  = "blue",
+         zeroColor = "red")
+
+# Figure 3. Coefficient plot showing regression results after propensity score matching, with respective 95% confidence interval
+
+# Figure 3 is a plot showing the result coefficients of our regression output for matched set of data with 95% confidence interval. It predicts the overall hourly wage based on all explanatory variables including the education level of respondents.
+
+
+
+```
+
+**Figure 4**. Plot showing the result coefficients of our regression output for matched set of data with 95% confidence interval. It predicts the overall hourly wage based on all explanatory variables including the education level of respondents.
